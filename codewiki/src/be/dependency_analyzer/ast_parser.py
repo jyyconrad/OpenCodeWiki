@@ -17,46 +17,49 @@ logger.setLevel(logging.DEBUG)
 
 class DependencyParser:
     """Parser for extracting code components from multi-language repositories."""
-    
-    def __init__(self, repo_path: str, include_patterns: List[str] = None, exclude_patterns: List[str] = None):
+
+    def __init__(self, repo_path: str, include_patterns: List[str] = None, exclude_patterns: List[str] = None, max_workers: int = None):
         """
         Initialize the dependency parser.
-        
+
         Args:
             repo_path: Path to the repository
             include_patterns: File patterns to include (e.g., ["*.cs", "*.py"])
             exclude_patterns: File/directory patterns to exclude (e.g., ["*Tests*"])
+            max_workers: Maximum number of parallel workers for file parsing (None = auto-detect)
         """
         self.repo_path = os.path.abspath(repo_path)
         self.components: Dict[str, Node] = {}
         self.modules: Set[str] = set()
         self.include_patterns = include_patterns
         self.exclude_patterns = exclude_patterns
-        
+        self.max_workers = max_workers
+
         self.analysis_service = AnalysisService()
 
     def parse_repository(self, filtered_folders: List[str] = None) -> Dict[str, Node]:
         logger.debug(f"Parsing repository at {self.repo_path}")
-        
+
         # Log custom patterns if set
         if self.include_patterns:
             logger.info(f"Using custom include patterns: {self.include_patterns}")
         if self.exclude_patterns:
             logger.info(f"Using custom exclude patterns: {self.exclude_patterns}")
-        
+
         structure_result = self.analysis_service._analyze_structure(
-            self.repo_path, 
+            self.repo_path,
             include_patterns=self.include_patterns,
             exclude_patterns=self.exclude_patterns
         )
-        
+
         call_graph_result = self.analysis_service._analyze_call_graph(
-            structure_result["file_tree"], 
-            self.repo_path
+            structure_result["file_tree"],
+            self.repo_path,
+            max_workers=self.max_workers
         )
-        
+
         self._build_components_from_analysis(call_graph_result)
-        
+
         logger.debug(f"Found {len(self.components)} components across {len(self.modules)} modules")
         return self.components
     

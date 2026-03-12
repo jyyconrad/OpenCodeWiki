@@ -14,6 +14,7 @@ from typing import Dict, List, Any, Optional
 from copy import deepcopy
 import traceback
 import logging
+import asyncio
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -183,12 +184,40 @@ class DocumentationGenerator:
         first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
         module_tree = file_manager.load_json(module_tree_path)
         first_module_tree = file_manager.load_json(first_module_tree_path)
-        
+
         # Get processing order (leaf modules first)
         processing_order = self.get_processing_order(first_module_tree)
 
-        
-        # Process modules in dependency order
+        # Separate leaf modules and parent modules
+        leaf_module_tasks = []
+        parent_modules = []
+
+        for module_path, module_name in processing_order:
+            module_info = module_tree
+            for path_part in module_path:
+                module_info = module_info[path_part]
+                if path_part != module_path[-1]:
+                    module_info = module_info.get("children", {})
+
+            if self.is_leaf_module(module_info):
+                leaf_module_tasks.append((module_path, module_name, module_info))
+            else:
+                parent_modules.append((module_path, module_name, module_info))
+
+        # Process leaf modules in parallel if enabled
+        if self.config.parallel.parallel_generation and len(leaf_module_tasks) > 1:
+            logger.info(f"📄 Processing {len(leaf_module_tasks)} leaf modules in parallel")
+            await self._process_leaf_modules_parallel(leaf_module_tasks, components, working_dir)
+        else:
+            # Process sequentially
+            for module_path, module_name, module_info in leaf_module_tasks:
+                module_key = "/".join(module_path)
+                logger.info(f"📄 Processing leaf module: {module_key}")
+                await self.agent_orchestrator.process_module(
+                    module_name, components, module_info["components"], module_path, working_dir
+                )
+
+        # Process parent modules in order (they depend on children)
         final_module_tree = module_tree
         processed_modules = set()
 
@@ -199,28 +228,27 @@ class DocumentationGenerator:
                     module_info = module_tree
                     for path_part in module_path:
                         module_info = module_info[path_part]
-                        if path_part != module_path[-1]:  # Not the last part
+                        if path_part != module_path[-1]:
                             module_info = module_info.get("children", {})
-                    
-                    # Skip if already processed
+
+                    # Skip if already processed (leaf modules)
                     module_key = "/".join(module_path)
                     if module_key in processed_modules:
                         continue
-                    
-                    # Process the module
+
+                    # Skip leaf modules (already processed)
                     if self.is_leaf_module(module_info):
-                        logger.info(f"📄 Processing leaf module: {module_key}")
-                        final_module_tree = await self.agent_orchestrator.process_module(
-                            module_name, components, module_info["components"], module_path, working_dir
-                        )
-                    else:
-                        logger.info(f"📁 Processing parent module: {module_key}")
-                        final_module_tree = await self.generate_parent_module_docs(
-                            module_path, working_dir
-                        )
-                    
+                        processed_modules.add(module_key)
+                        continue
+
+                    # Process parent module
+                    logger.info(f"📁 Processing parent module: {module_key}")
+                    final_module_tree = await self.generate_parent_module_docs(
+                        module_path, working_dir
+                    )
+
                     processed_modules.add(module_key)
-                    
+
                 except Exception as e:
                     logger.error(f"Failed to process module {module_key}: {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
@@ -245,8 +273,46 @@ class DocumentationGenerator:
             repo_overview_path = os.path.join(working_dir, f"{repo_name}.md")
             if os.path.exists(repo_overview_path):
                 os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
-        
+
         return working_dir
+
+    async def _process_leaf_modules_parallel(
+        self,
+        leaf_module_tasks: List[tuple],
+        components: Dict[str, Any],
+        working_dir: str
+    ):
+        """
+        Process leaf modules in parallel with concurrency control.
+
+        Args:
+            leaf_module_tasks: List of (module_path, module_name, module_info) tuples
+            components: Components dictionary
+            working_dir: Documentation output directory
+        """
+        max_concurrent = self.config.parallel.max_concurrent_llm_calls
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_single_module(module_path, module_name, module_info):
+            """Process a single module with semaphore control."""
+            async with semaphore:
+                try:
+                    module_key = "/".join(module_path)
+                    logger.info(f"📄 Processing leaf module: {module_key}")
+                    await self.agent_orchestrator.process_module(
+                        module_name, components, module_info["components"], module_path, working_dir
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to process module {'/'.join(module_path)}: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # Run all leaf modules in parallel with concurrency limit
+        tasks = [
+            process_single_module(module_path, module_name, module_info)
+            for module_path, module_name, module_info in leaf_module_tasks
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(f"✅ Parallel leaf module processing complete")
 
     async def generate_parent_module_docs(self, module_path: List[str], 
                                         working_dir: str) -> Dict[str, Any]:

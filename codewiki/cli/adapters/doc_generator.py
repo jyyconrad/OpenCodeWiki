@@ -141,7 +141,10 @@ class CLIDocumentationGenerator:
                 max_token_per_module=self.config.get('max_token_per_module', 36369),
                 max_token_per_leaf_module=self.config.get('max_token_per_leaf_module', 16000),
                 max_depth=self.config.get('max_depth', 2),
-                agent_instructions=self.config.get('agent_instructions')
+                agent_instructions=self.config.get('agent_instructions'),
+                output_language=self.config.get('output_language', 'zh-CN'),
+                scan=self.config.get('scan'),
+                parallel=self.config.get('parallel')
             )
             
             # Run backend documentation generation

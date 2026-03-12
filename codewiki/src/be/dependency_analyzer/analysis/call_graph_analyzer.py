@@ -10,6 +10,8 @@ from typing import Dict, List
 import logging
 import traceback
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
 from codewiki.src.be.dependency_analyzer.models.core import Node, CallRelationship
 from codewiki.src.be.dependency_analyzer.utils.patterns import CODE_EXTENSIONS
 from codewiki.src.be.dependency_analyzer.utils.security import safe_open_text
@@ -24,26 +26,32 @@ class CallGraphAnalyzer:
         self.call_relationships: List[CallRelationship] = []
         logger.debug("CallGraphAnalyzer initialized.")
 
-    def analyze_code_files(self, code_files: List[Dict], base_dir: str) -> Dict:
+    def analyze_code_files(self, code_files: List[Dict], base_dir: str, max_workers: int = None) -> Dict:
         """
         Complete analysis: Analyze all files to build complete call graph with all nodes.
 
         This approach:
-        1. Analyzes all code files 
+        1. Analyzes all code files
         2. Extracts all functions and relationships
         3. Builds complete call graph
-        4. Returns all nodes and relationships 
+        4. Returns all nodes and relationships
+
+        Args:
+            code_files: List of code file information dictionaries
+            base_dir: Repository base directory
+            max_workers: Maximum number of parallel workers (None = auto-detect)
         """
         logger.debug(f"Starting analysis of {len(code_files)} files")
 
         self.functions = {}
         self.call_relationships = []
 
-        files_analyzed = 0
-        for file_info in code_files:
-            logger.debug(f"Analyzing: {file_info['path']}")
-            self._analyze_code_file(base_dir, file_info)
-            files_analyzed += 1
+        # Use parallel parsing if we have multiple files
+        if len(code_files) > 1 and max_workers != 1:
+            files_analyzed = self._analyze_files_parallel(code_files, base_dir, max_workers)
+        else:
+            files_analyzed = self._analyze_files_sequential(code_files, base_dir)
+
         logger.debug(
             f"Analysis complete: {files_analyzed} files analyzed, {len(self.functions)} functions, {len(self.call_relationships)} relationships"
         )
@@ -65,6 +73,104 @@ class CallGraphAnalyzer:
             "relationships": [rel.model_dump() for rel in self.call_relationships],
             "visualization": viz_data,
         }
+
+    def _analyze_files_sequential(self, code_files: List[Dict], base_dir: str) -> int:
+        """Analyze files sequentially."""
+        files_analyzed = 0
+        for file_info in code_files:
+            logger.debug(f"Analyzing: {file_info['path']}")
+            self._analyze_code_file(base_dir, file_info)
+            files_analyzed += 1
+        return files_analyzed
+
+    def _analyze_files_parallel(self, code_files: List[Dict], base_dir: str, max_workers: int = None) -> int:
+        """
+        Analyze files in parallel using ThreadPoolExecutor.
+
+        Args:
+            code_files: List of code file information dictionaries
+            base_dir: Repository base directory
+            max_workers: Maximum number of parallel workers (None = auto-detect)
+
+        Returns:
+            Number of files successfully analyzed
+        """
+        import os
+        if max_workers is None:
+            max_workers = os.cpu_count() or 4
+
+        logger.debug(f"Analyzing {len(code_files)} files in parallel with {max_workers} workers")
+
+        files_analyzed = 0
+        results_lock = __import__('threading').Lock()
+
+        def analyze_single_file(file_info: Dict) -> tuple:
+            """Analyze a single file and return results."""
+            try:
+                base = Path(base_dir)
+                file_path = base / file_info["path"]
+                content = safe_open_text(base, file_path)
+                language = file_info["language"]
+
+                # Import analyzer based on language
+                if language == "python":
+                    from codewiki.src.be.dependency_analyzer.analyzers.python import analyze_python_file
+                    functions, relationships = analyze_python_file(str(file_path), content, repo_path=str(base_dir))
+                elif language == "javascript":
+                    from codewiki.src.be.dependency_analyzer.analyzers.javascript import analyze_javascript_file_treesitter
+                    functions, relationships = analyze_javascript_file_treesitter(str(file_path), content, repo_path=str(base_dir))
+                elif language == "typescript":
+                    from codewiki.src.be.dependency_analyzer.analyzers.typescript import analyze_typescript_file_treesitter
+                    functions, relationships = analyze_typescript_file_treesitter(str(file_path), content, repo_path=str(base_dir))
+                elif language == "java":
+                    from codewiki.src.be.dependency_analyzer.analyzers.java import analyze_java_file
+                    functions, relationships = analyze_java_file(str(file_path), content, repo_path=str(base_dir))
+                elif language == "kotlin":
+                    from codewiki.src.be.dependency_analyzer.analyzers.kotlin import analyze_kotlin_file
+                    functions, relationships = analyze_kotlin_file(str(file_path), content, repo_path=str(base_dir))
+                elif language == "csharp":
+                    from codewiki.src.be.dependency_analyzer.analyzers.csharp import analyze_csharp_file
+                    functions, relationships = analyze_csharp_file(str(file_path), content, repo_path=str(base_dir))
+                elif language == "c":
+                    from codewiki.src.be.dependency_analyzer.analyzers.c import analyze_c_file
+                    functions, relationships = analyze_c_file(str(file_path), content, repo_path=str(base_dir))
+                elif language == "cpp":
+                    from codewiki.src.be.dependency_analyzer.analyzers.cpp import analyze_cpp_file
+                    functions, relationships = analyze_cpp_file(str(file_path), content, repo_path=str(base_dir))
+                elif language == "php":
+                    from codewiki.src.be.dependency_analyzer.analyzers.php import analyze_php_file
+                    functions, relationships = analyze_php_file(str(file_path), content, repo_path=str(base_dir))
+                else:
+                    return (file_info['path'], [], [], f"Unsupported language: {language}")
+
+                return (file_info['path'], functions, relationships, None)
+            except Exception as e:
+                logger.error(f"Error analyzing {file_info['path']}: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return (file_info['path'], [], [], str(e))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {executor.submit(analyze_single_file, file_info): file_info for file_info in code_files}
+
+            for future in as_completed(future_to_file):
+                file_path, functions, relationships, error = future.result()
+
+                if error:
+                    logger.warning(f"Failed to analyze {file_path}: {error}")
+                else:
+                    # Add results to shared state
+                    with results_lock:
+                        for func in functions:
+                            func_id = func.id if func.id else f"{file_path}:{func.name}"
+                            self.functions[func_id] = func
+
+                        self.call_relationships.extend(relationships)
+                        files_analyzed += 1
+
+                        if files_analyzed % 10 == 0:
+                            logger.debug(f"Progress: {files_analyzed} files analyzed")
+
+        return files_analyzed
 
     def extract_code_files(self, file_tree: Dict) -> List[Dict]:
         """

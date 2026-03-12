@@ -59,6 +59,15 @@ class ScanConfig:
 
 
 @dataclass
+class ParallelConfig:
+    """Parallel processing configuration."""
+    parallel_parsing: bool = True  # 启用并行文件解析
+    parallel_generation: bool = True  # 启用并行文档生成
+    max_workers: int = None  # None 则使用 CPU 核心数
+    max_concurrent_llm_calls: int = 5  # LLM API 并发调用限制
+
+
+@dataclass
 class Config:
     """Configuration class for CodeWiki."""
     repo_path: str
@@ -82,6 +91,8 @@ class Config:
     output_language: str = "zh-CN"
     # Scan configuration for layered scanning
     scan: ScanConfig = field(default_factory=ScanConfig)
+    # Parallel processing configuration
+    parallel: ParallelConfig = field(default_factory=ParallelConfig)
     
     @property
     def include_patterns(self) -> Optional[List[str]]:
@@ -180,7 +191,8 @@ class Config:
         max_depth: int = MAX_DEPTH,
         agent_instructions: Optional[Dict[str, Any]] = None,
         output_language: str = "zh-CN",
-        scan: Optional[Dict[str, Any]] = None
+        scan: Optional[Dict[str, Any]] = None,
+        parallel: Optional[Dict[str, Any]] = None
     ) -> 'Config':
         """
         Create configuration for CLI context.
@@ -200,6 +212,7 @@ class Config:
             agent_instructions: Custom agent instructions dict
             output_language: Output document language (default: zh-CN)
             scan: Scan configuration dict (auto_threshold, enable_layered_scan, exclude_dirs)
+            parallel: Parallel processing configuration dict (parallel_parsing, parallel_generation, max_workers, max_concurrent_llm_calls)
 
         Returns:
             Config instance
@@ -228,5 +241,9 @@ class Config:
         # Update scan configuration if provided
         if scan:
             config.scan = ScanConfig(**scan)
+
+        # Update parallel processing configuration if provided
+        if parallel:
+            config.parallel = ParallelConfig(**parallel)
 
         return config

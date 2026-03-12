@@ -150,6 +150,28 @@ def parse_patterns(patterns_str: str) -> List[str]:
     default=None,
     help="Comma-separated directory names to exclude from scanning (e.g., 'node_modules,.venv,test')",
 )
+@click.option(
+    "--max-workers",
+    type=int,
+    default=None,
+    help="Maximum number of parallel workers for file parsing (default: CPU core count)",
+)
+@click.option(
+    "--no-parallel-parsing",
+    is_flag=True,
+    help="Disable parallel file parsing",
+)
+@click.option(
+    "--no-parallel-generation",
+    is_flag=True,
+    help="Disable parallel document generation",
+)
+@click.option(
+    "--max-concurrent-llm-calls",
+    type=int,
+    default=5,
+    help="Maximum concurrent LLM API calls for parallel generation (default: 5)",
+)
 @click.pass_context
 def generate_command(
     ctx,
@@ -170,7 +192,11 @@ def generate_command(
     language: Optional[str],
     auto_threshold: Optional[int],
     no_layered_scan: bool,
-    scan_exclude_dirs: Optional[str]
+    scan_exclude_dirs: Optional[str],
+    max_workers: Optional[int],
+    no_parallel_parsing: bool,
+    no_parallel_generation: bool,
+    max_concurrent_llm_calls: int
 ):
     """
     Generate comprehensive documentation for a code repository.
@@ -388,8 +414,17 @@ def generate_command(
             'max_depth': config.scan.max_depth,
         }
 
+        # Build parallel processing configuration
+        parallel_config = {
+            'parallel_parsing': not no_parallel_parsing,
+            'parallel_generation': not no_parallel_generation,
+            'max_workers': max_workers,
+            'max_concurrent_llm_calls': max_concurrent_llm_calls,
+        }
+
         if verbose:
             logger.debug(f"Scan config: {scan_config}")
+            logger.debug(f"Parallel config: {parallel_config}")
 
         # Create generator
         generator = CLIDocumentationGenerator(
@@ -412,6 +447,8 @@ def generate_command(
                 'output_language': output_language,
                 # Scan configuration for layered scanning
                 'scan': scan_config,
+                # Parallel processing configuration
+                'parallel': parallel_config,
             },
             verbose=verbose,
             generate_html=github_pages

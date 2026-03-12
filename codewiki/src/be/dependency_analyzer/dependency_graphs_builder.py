@@ -44,7 +44,8 @@ class DependencyGraphBuilder:
         parser = DependencyParser(
             self.config.repo_path,
             include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns
+            exclude_patterns=exclude_patterns,
+            max_workers=self.config.parallel.max_workers if self.config.parallel else None
         )
 
         filtered_folders = None
