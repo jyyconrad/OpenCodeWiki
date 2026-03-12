@@ -18,6 +18,54 @@ from codewiki.cli.utils.validation import (
 
 
 @dataclass
+class ScanConfig:
+    """
+    Scan configuration for layered scanning system.
+
+    Attributes:
+        auto_threshold: 文件数阈值，超过则启用分层扫描 (default: 1000)
+        enable_layered_scan: 是否启用分层扫描 (default: True)
+        max_depth: 扫描最大深度 (default: 2)
+        exclude_dirs: 排除的目录列表 (default: node_modules, .venv, __pycache__, .git 等)
+        file_line_threshold: 单文件代码行数阈值，超过则标记为复杂文件 (default: 500)
+    """
+    auto_threshold: int = 1000
+    enable_layered_scan: bool = True
+    max_depth: int = 2
+    exclude_dirs: List[str] = field(default_factory=lambda: [
+        "node_modules", ".venv", "__pycache__", ".git",
+        "venv", "env", ".idea", ".vscode", "dist", "build",
+        ".eggs", "*.egg-info", "site-packages"
+    ])
+    file_line_threshold: int = 500
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary, excluding None values."""
+        return {
+            'auto_threshold': self.auto_threshold,
+            'enable_layered_scan': self.enable_layered_scan,
+            'max_depth': self.max_depth,
+            'exclude_dirs': self.exclude_dirs,
+            'file_line_threshold': self.file_line_threshold,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ScanConfig':
+        """Create ScanConfig from dictionary."""
+        return cls(
+            auto_threshold=data.get('auto_threshold', 1000),
+            enable_layered_scan=data.get('enable_layered_scan', True),
+            max_depth=data.get('max_depth', 2),
+            exclude_dirs=data.get('exclude_dirs', [
+                "node_modules", ".venv", "__pycache__", ".git",
+                "venv", "env", ".idea", ".vscode", "dist", "build",
+                ".eggs", "*.egg-info", "site-packages"
+            ]),
+            file_line_threshold=data.get('file_line_threshold', 500),
+        )
+
+
+@dataclass
 class AgentInstructions:
     """
     Custom instructions for the documentation agent.
@@ -119,6 +167,7 @@ class Configuration:
         max_depth: Maximum depth for hierarchical decomposition (default: 2)
         agent_instructions: Custom instructions for documentation generation
         output_language: Output document language (default: zh-CN)
+        scan: Scan configuration for layered scanning system
     """
     base_url: str
     main_model: str
@@ -131,6 +180,7 @@ class Configuration:
     max_depth: int = 2
     agent_instructions: AgentInstructions = field(default_factory=AgentInstructions)
     output_language: str = "zh-CN"
+    scan: ScanConfig = field(default_factory=ScanConfig)
 
     def validate(self):
         """
@@ -159,6 +209,8 @@ class Configuration:
         }
         if self.agent_instructions and not self.agent_instructions.is_empty():
             result['agent_instructions'] = self.agent_instructions.to_dict()
+        if self.scan:
+            result['scan'] = self.scan.to_dict()
         return result
 
     @classmethod
@@ -176,6 +228,10 @@ class Configuration:
         if 'agent_instructions' in data:
             agent_instructions = AgentInstructions.from_dict(data['agent_instructions'])
 
+        scan = ScanConfig()
+        if 'scan' in data:
+            scan = ScanConfig.from_dict(data['scan'])
+
         return cls(
             base_url=data.get('base_url', ''),
             main_model=data.get('main_model', ''),
@@ -188,6 +244,7 @@ class Configuration:
             max_depth=data.get('max_depth', 2),
             agent_instructions=agent_instructions,
             output_language=data.get('output_language', 'zh-CN'),
+            scan=scan,
         )
 
     def is_complete(self) -> bool:
@@ -215,7 +272,7 @@ class Configuration:
         Returns:
             Backend Config instance ready for documentation generation
         """
-        from codewiki.src.config import Config
+        from codewiki.src.config import Config, ScanConfig as BackendScanConfig
 
         # Merge runtime instructions with persistent settings
         # Runtime instructions take precedence
@@ -242,5 +299,6 @@ class Configuration:
             max_token_per_leaf_module=self.max_token_per_leaf_module,
             max_depth=self.max_depth,
             agent_instructions=final_instructions.to_dict() if final_instructions else None,
-            output_language=self.output_language
+            output_language=self.output_language,
+            scan=self.scan.to_dict() if self.scan else None
         )

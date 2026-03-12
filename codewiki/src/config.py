@@ -44,6 +44,21 @@ LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'http://0.0.0.0:4000/')
 LLM_API_KEY = os.getenv('LLM_API_KEY', 'sk-1234')
 
 @dataclass
+class ScanConfig:
+    """Scan configuration for layered scanning system."""
+    auto_threshold: int = 1000  # 文件数阈值，超过则启用分层扫描
+    enable_layered_scan: bool = True  # 是否启用分层扫描
+    max_depth: int = 2  # 扫描最大深度
+    exclude_dirs: List[str] = field(default_factory=lambda: [
+        "node_modules", ".venv", "__pycache__", ".git",
+        "venv", "env", ".idea", ".vscode", "dist", "build",
+        ".eggs", "*.egg-info", "site-packages"
+    ])
+    # 代码行数阈值（单文件超过此行数则标记为复杂文件）
+    file_line_threshold: int = 500
+
+
+@dataclass
 class Config:
     """Configuration class for CodeWiki."""
     repo_path: str
@@ -65,6 +80,8 @@ class Config:
     agent_instructions: Optional[Dict[str, Any]] = None
     # Output language
     output_language: str = "zh-CN"
+    # Scan configuration for layered scanning
+    scan: ScanConfig = field(default_factory=ScanConfig)
     
     @property
     def include_patterns(self) -> Optional[List[str]]:
@@ -162,7 +179,8 @@ class Config:
         max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE,
         max_depth: int = MAX_DEPTH,
         agent_instructions: Optional[Dict[str, Any]] = None,
-        output_language: str = "zh-CN"
+        output_language: str = "zh-CN",
+        scan: Optional[Dict[str, Any]] = None
     ) -> 'Config':
         """
         Create configuration for CLI context.
@@ -181,6 +199,7 @@ class Config:
             max_depth: Maximum depth for hierarchical decomposition
             agent_instructions: Custom agent instructions dict
             output_language: Output document language (default: zh-CN)
+            scan: Scan configuration dict (auto_threshold, enable_layered_scan, exclude_dirs)
 
         Returns:
             Config instance
@@ -188,7 +207,7 @@ class Config:
         repo_name = os.path.basename(os.path.normpath(repo_path))
         base_output_dir = os.path.join(output_dir, "temp")
 
-        return cls(
+        config = cls(
             repo_path=repo_path,
             output_dir=base_output_dir,
             dependency_graph_dir=os.path.join(base_output_dir, DEPENDENCY_GRAPHS_DIR),
@@ -205,3 +224,9 @@ class Config:
             agent_instructions=agent_instructions,
             output_language=output_language
         )
+
+        # Update scan configuration if provided
+        if scan:
+            config.scan = ScanConfig(**scan)
+
+        return config

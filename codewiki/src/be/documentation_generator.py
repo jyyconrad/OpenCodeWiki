@@ -1,15 +1,29 @@
-import logging
+"""
+Documentation generator with layered scanning support.
+
+This module orchestrates the documentation generation process, including:
+- Directory scanning and file statistics
+- Layered scanning decision making
+- AI-powered file classification
+- Module documentation generation
+"""
+
 import os
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from copy import deepcopy
 import traceback
+import logging
 
-# Configure logging and monitoring
+# Configure logging
 logger = logging.getLogger(__name__)
 
 # Local imports
-from codewiki.src.be.dependency_analyzer import DependencyGraphBuilder
+from codewiki.src.be.dependency_analyzer import (
+    DependencyGraphBuilder,
+    DirectoryScanner,
+    ScanResult
+)
 from codewiki.src.be.llm_services import call_llm
 from codewiki.src.be.prompt_template import (
     REPO_OVERVIEW_PROMPT,
@@ -24,21 +38,51 @@ from codewiki.src.config import (
 )
 from codewiki.src.utils import file_manager
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
+from codewiki.src.be.agent_tools.file_classifier import (
+    FileClassifier,
+    ClassificationSummary
+)
 
 
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
-    
+
     def __init__(self, config: Config, commit_id: str = None):
         self.config = config
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)
         self.agent_orchestrator = AgentOrchestrator(config)
+
+        # Layered scanning components
+        self.scanner: Optional[DirectoryScanner] = None
+        self.classifier: Optional[FileClassifier] = None
+        self._scan_result: Optional[ScanResult] = None
+        self._classification_summary: Optional[ClassificationSummary] = None
+
+    def _initialize_layered_scan(self):
+        """Initialize layered scanning system."""
+        if not self.config.scan.enable_layered_scan:
+            logger.info("Layered scan is disabled in configuration")
+            return
+
+        # Create scanner
+        self.scanner = DirectoryScanner(
+            repo_path=self.config.repo_path,
+            exclude_dirs=self.config.scan.exclude_dirs,
+            auto_threshold=self.config.scan.auto_threshold,
+            enable_layered_scan=self.config.scan.enable_layered_scan,
+            file_line_threshold=self.config.scan.file_line_threshold,
+        )
+
+        # Create classifier
+        self.classifier = FileClassifier(self.config)
+
+        logger.info("Layered scan system initialized")
     
     def create_documentation_metadata(self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int):
         """Create a metadata file with documentation generation information."""
         from datetime import datetime
-        
+
         metadata = {
             "generation_info": {
                 "timestamp": datetime.now().isoformat(),
@@ -54,11 +98,19 @@ class DocumentationGenerator:
             },
             "files_generated": [
                 "overview.md",
-                "module_tree.json",
+                "module-tree.json",
                 "first_module_tree.json"
             ]
         }
-        
+
+        # Add scan statistics if layered scan was used
+        if self._scan_result:
+            metadata["scan_statistics"] = self._scan_result.to_dict()
+
+        # Add classification summary if available
+        if self._classification_summary:
+            metadata["classification_summary"] = self._classification_summary.to_dict()
+
         # Add generated markdown files to the metadata
         try:
             for file_path in os.listdir(working_dir):
@@ -66,7 +118,7 @@ class DocumentationGenerator:
                     metadata["files_generated"].append(file_path)
         except Exception as e:
             logger.warning(f"Could not list generated files: {e}")
-        
+
         metadata_path = os.path.join(working_dir, "metadata.json")
         file_manager.save_json(metadata, metadata_path)
 
@@ -251,19 +303,55 @@ class DocumentationGenerator:
     async def run(self) -> None:
         """Run the complete documentation generation process using dynamic programming."""
         try:
-            # Build dependency graph
+            # Step 1: Initialize and run layered scan if enabled
+            if self.config.scan.enable_layered_scan:
+                self._initialize_layered_scan()
+
+                # Scan repository
+                logger.info("Starting repository scan...")
+                self._scan_result = self.scanner.scan()
+
+                # Log scan results
+                logger.info(
+                    f"Scan complete: {self._scan_result.total_files} files, "
+                    f"{self._scan_result.total_lines} lines"
+                )
+                logger.info(f"Files by language: {self._scan_result.by_language}")
+
+                # Check if layered scan is needed
+                if self._scan_result.should_use_layered_scan:
+                    logger.info(
+                        f"File count ({self._scan_result.total_files}) exceeds threshold "
+                        f"({self.config.scan.auto_threshold}), using layered scan"
+                    )
+
+                    # Classify files using AI
+                    files_info = [
+                        {'path': f.path, 'language': f.language, 'lines': f.lines}
+                        for f in self._scan_result.files
+                    ]
+                    self._classification_summary = self.classifier.classify_files(
+                        files=files_info,
+                        repo_path=self.config.repo_path,
+                        total_lines=self._scan_result.total_lines
+                    )
+
+                    logger.info(
+                        f"Classification complete: {self._classification_summary.deep_count} files "
+                        f"need deep analysis, {self._classification_summary.basic_count} files need basic analysis"
+                    )
+
+            # Step 2: Build dependency graph
             components, leaf_nodes = self.graph_builder.build_dependency_graph()
 
             logger.debug(f"Found {len(leaf_nodes)} leaf nodes")
-            # logger.debug(f"Leaf nodes:\n{'\n'.join(sorted(leaf_nodes)[:200])}")
-            # exit()
-            
+
             # Cluster modules
             working_dir = os.path.abspath(self.config.docs_dir)
             file_manager.ensure_directory(working_dir)
             first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
             module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
-            
+
             # Check if module tree exists
             if os.path.exists(first_module_tree_path):
                 logger.debug(f"Module tree found at {first_module_tree_path}")
@@ -272,22 +360,22 @@ class DocumentationGenerator:
                 logger.debug(f"Module tree not found at {module_tree_path}, clustering modules")
                 module_tree = cluster_modules(leaf_nodes, components, self.config)
                 file_manager.save_json(module_tree, first_module_tree_path)
-            
+
             file_manager.save_json(module_tree, module_tree_path)
-            
+
             logger.debug(f"Grouped components into {len(module_tree)} modules")
-            
-            # Generate module documentation using dynamic programming approach
+
+            # Step 3: Generate module documentation using dynamic programming approach
             # This processes leaf modules first, then parent modules
             working_dir = await self.generate_module_documentation(components, leaf_nodes)
-            
-            # Create documentation metadata
+
+            # Step 4: Create documentation metadata
             self.create_documentation_metadata(working_dir, components, len(leaf_nodes))
-            
+
             logger.debug(f"Documentation generation completed successfully using dynamic programming!")
             logger.debug(f"Processing order: leaf modules → parent modules → repository overview")
             logger.debug(f"Documentation saved to: {working_dir}")
-            
+
         except Exception as e:
             logger.error(f"Documentation generation failed: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")

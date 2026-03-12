@@ -133,6 +133,23 @@ def parse_patterns(patterns_str: str) -> List[str]:
     default=None,
     help="Output document language (e.g., 'zh-CN', 'en-US'). Overrides config.",
 )
+@click.option(
+    "--auto-threshold",
+    type=int,
+    default=None,
+    help="File count threshold for enabling layered scan (default: 1000)",
+)
+@click.option(
+    "--no-layered-scan",
+    is_flag=True,
+    help="Disable layered scanning even if file count exceeds threshold",
+)
+@click.option(
+    "--scan-exclude-dirs",
+    type=str,
+    default=None,
+    help="Comma-separated directory names to exclude from scanning (e.g., 'node_modules,.venv,test')",
+)
 @click.pass_context
 def generate_command(
     ctx,
@@ -150,7 +167,10 @@ def generate_command(
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
     max_depth: Optional[int],
-    language: Optional[str]
+    language: Optional[str],
+    auto_threshold: Optional[int],
+    no_layered_scan: bool,
+    scan_exclude_dirs: Optional[str]
 ):
     """
     Generate comprehensive documentation for a code repository.
@@ -354,7 +374,23 @@ def generate_command(
 
         # Determine output language (CLI option overrides config)
         output_language = language if language is not None else config.output_language
-        
+
+        # Build scan configuration
+        scan_config = {
+            'auto_threshold': auto_threshold if auto_threshold is not None else config.scan.auto_threshold,
+            'enable_layered_scan': not no_layered_scan and config.scan.enable_layered_scan,
+            'exclude_dirs': (
+                [d.strip() for d in scan_exclude_dirs.split(',') if d.strip()]
+                if scan_exclude_dirs
+                else config.scan.exclude_dirs
+            ),
+            'file_line_threshold': config.scan.file_line_threshold,
+            'max_depth': config.scan.max_depth,
+        }
+
+        if verbose:
+            logger.debug(f"Scan config: {scan_config}")
+
         # Create generator
         generator = CLIDocumentationGenerator(
             repo_path=repo_path,
@@ -374,6 +410,8 @@ def generate_command(
                 'max_depth': max_depth if max_depth is not None else config.max_depth,
                 # Output language (CLI option overrides config)
                 'output_language': output_language,
+                # Scan configuration for layered scanning
+                'scan': scan_config,
             },
             verbose=verbose,
             generate_html=github_pages
