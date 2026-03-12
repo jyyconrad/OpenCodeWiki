@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <strong>🆕 New in v1.2.0:</strong> Multi-language Output • Layered Scanning • Parallel Processing • Hierarchical Output Structure
+</p>
+
+<p align="center">
   <a href="https://python.org/"><img alt="Python version" src="https://img.shields.io/badge/python-3.12+-blue?style=flat-square" /></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" /></a>
   <a href="https://github.com/FSoft-AI4Code/CodeWiki/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FSoft-AI4Code/CodeWiki?style=flat-square" /></a>
@@ -71,6 +75,115 @@ codewiki generate --github-pages --create-branch
 ### Usage Example
 
 ![CLI Usage Example](https://github.com/FSoft-AI4Code/CodeWiki/releases/download/assets/cli-usage-example.gif)
+
+---
+
+## New Features (v1.2.0)
+
+### Multi-Language Output Support
+
+CodeWiki now supports generating documentation in multiple languages:
+
+```bash
+# Generate documentation in English
+codewiki generate --language en-US
+
+# Generate documentation in Chinese (default)
+codewiki generate --language zh-CN
+
+# Generate documentation in Japanese
+codewiki generate --language ja-JP
+```
+
+**Supported Languages:**
+- `zh-CN` - 简体中文 (Default)
+- `en-US` - English (US)
+- `ja-JP` - 日本語
+
+### Layered Scanning System
+
+For large codebases (1000+ files), CodeWiki automatically enables layered scanning:
+
+```bash
+# Automatic layered scanning for large repositories
+codewiki generate
+
+# Configure layered scan threshold
+codewiki config set --auto-threshold 500
+
+# Disable layered scanning
+codewiki config set --enable-layered-scan false
+
+# Set file line threshold for deep analysis
+codewiki config set --file-line-threshold 300
+```
+
+**How it works:**
+1. **File Scanning**: Automatically scans and counts files in the repository
+2. **AI Classification**: Uses LLM to classify files into "deep analysis" and "basic analysis" categories
+3. **Prioritized Processing**: Processes high-priority files first with full AI analysis
+4. **Efficient Scaling**: Handles repositories of any size efficiently
+
+### Parallel Processing Optimization
+
+Speed up documentation generation with parallel processing:
+
+```bash
+# Enable parallel processing (default)
+codewiki generate --parallel
+
+# Configure worker count
+codewiki config set --max-workers 8
+
+# Set LLM concurrency limit
+codewiki config set --max-concurrent-llm-calls 3
+
+# Disable parallel processing for debugging
+codewiki config set --parallel-parsing false
+```
+
+**Performance Benefits:**
+- **File Parsing**: Parallel file parsing speeds up analysis by 2-4x
+- **Document Generation**: Parallel generation of leaf modules
+- **Smart Concurrency**: Automatically limits LLM calls to avoid rate limits
+
+### Hierarchical Output Structure
+
+Organize generated documentation with a hierarchical directory structure:
+
+```bash
+# Use hierarchical structure (default: flat)
+codewiki config set --directory-structure hierarchical
+
+# Enable/disable index file generation
+codewiki config set --generate-index true
+
+# Generate documentation
+codewiki generate
+```
+
+**Output Structure Comparison:**
+
+| Structure Type | Layout | Best For |
+|---------------|--------|----------|
+| **Flat** (default) | All files in `docs/` | Small projects, simple navigation |
+| **Hierarchical** | Organized by `overview/`, `core/`, `utils/` | Large projects, better organization |
+
+**Hierarchical Structure Example:**
+```
+docs/
+├── index.md                  # Main navigation index
+├── overview/
+│   └── repository-overview.md  # Overall architecture
+├── core/
+│   ├── module-a/
+│   │   └── index.md
+│   └── module-b/
+│       └── index.md
+└── utils/
+    └── helpers/
+        └── index.md
+```
 
 ---
 
@@ -258,6 +371,7 @@ Generated documentation includes both **textual descriptions** and **visual arti
 
 ### Output Structure
 
+**Flat Structure (default, backward compatible):**
 ```
 ./docs/
 ├── overview.md              # Repository overview (start here!)
@@ -266,7 +380,26 @@ Generated documentation includes both **textual descriptions** and **visual arti
 ├── module_tree.json         # Hierarchical module structure
 ├── first_module_tree.json   # Initial clustering result
 ├── metadata.json            # Generation metadata
+├── index.md                 # Documentation index (auto-generated)
 └── index.html               # Interactive viewer (with --github-pages)
+```
+
+**Hierarchical Structure (new in v1.2.0):**
+```
+./docs/
+├── index.md                      # Main navigation index
+├── overview/
+│   └── repository-overview.md    # Overall architecture
+├── core/
+│   ├── module-a/
+│   │   └── index.md
+│   └── module-b/
+│       └── index.md
+├── utils/
+│   └── helpers/
+│       └── index.md
+├── module_tree.json
+└── index.html
 ```
 
 ---
