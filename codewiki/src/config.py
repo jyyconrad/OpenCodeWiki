@@ -68,6 +68,13 @@ class ParallelConfig:
 
 
 @dataclass
+class OutputConfig:
+    """Output configuration for documentation generation."""
+    directory_structure: str = "flat"  # "flat" | "hierarchical"
+    generate_index: bool = True  # 是否生成索引文件
+
+
+@dataclass
 class Config:
     """Configuration class for CodeWiki."""
     repo_path: str
@@ -89,6 +96,8 @@ class Config:
     agent_instructions: Optional[Dict[str, Any]] = None
     # Output language
     output_language: str = "zh-CN"
+    # Output configuration
+    output: OutputConfig = field(default_factory=OutputConfig)
     # Scan configuration for layered scanning
     scan: ScanConfig = field(default_factory=ScanConfig)
     # Parallel processing configuration
@@ -192,7 +201,8 @@ class Config:
         agent_instructions: Optional[Dict[str, Any]] = None,
         output_language: str = "zh-CN",
         scan: Optional[Dict[str, Any]] = None,
-        parallel: Optional[Dict[str, Any]] = None
+        parallel: Optional[Dict[str, Any]] = None,
+        output: Optional[Dict[str, Any]] = None
     ) -> 'Config':
         """
         Create configuration for CLI context.
@@ -213,6 +223,7 @@ class Config:
             output_language: Output document language (default: zh-CN)
             scan: Scan configuration dict (auto_threshold, enable_layered_scan, exclude_dirs)
             parallel: Parallel processing configuration dict (parallel_parsing, parallel_generation, max_workers, max_concurrent_llm_calls)
+            output: Output configuration dict (directory_structure, generate_index)
 
         Returns:
             Config instance
@@ -245,5 +256,9 @@ class Config:
         # Update parallel processing configuration if provided
         if parallel:
             config.parallel = ParallelConfig(**parallel)
+
+        # Update output configuration if provided
+        if output:
+            config.output = OutputConfig(**output)
 
         return config

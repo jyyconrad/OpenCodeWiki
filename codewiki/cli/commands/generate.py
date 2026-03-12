@@ -172,6 +172,17 @@ def parse_patterns(patterns_str: str) -> List[str]:
     default=5,
     help="Maximum concurrent LLM API calls for parallel generation (default: 5)",
 )
+@click.option(
+    "--directory-structure",
+    type=click.Choice(['flat', 'hierarchical'], case_sensitive=False),
+    default="flat",
+    help="Output directory structure (default: flat)",
+)
+@click.option(
+    "--no-index",
+    is_flag=True,
+    help="Disable generation of index.md file",
+)
 @click.pass_context
 def generate_command(
     ctx,
@@ -196,51 +207,61 @@ def generate_command(
     max_workers: Optional[int],
     no_parallel_parsing: bool,
     no_parallel_generation: bool,
-    max_concurrent_llm_calls: int
+    max_concurrent_llm_calls: int,
+    directory_structure: str,
+    no_index: bool
 ):
     """
     Generate comprehensive documentation for a code repository.
-    
+
     Analyzes the current repository and generates documentation using LLM-powered
     analysis. Documentation is output to ./docs/ by default.
-    
+
     Examples:
-    
+
     \b
     # Basic generation
     $ codewiki generate
-    
+
     \b
     # With git branch creation and GitHub Pages
     $ codewiki generate --create-branch --github-pages
-    
+
     \b
     # Force full regeneration
     $ codewiki generate --no-cache
-    
+
     \b
     # C# project: only .cs files, exclude tests
     $ codewiki generate --include "*.cs" --exclude "*Tests*,*Specs*"
-    
+
     \b
     # Focus on specific modules with architecture docs
     $ codewiki generate --focus "src/core,src/api" --doc-type architecture
-    
+
     \b
     # Custom instructions
     $ codewiki generate --instructions "Focus on public APIs and include usage examples"
-    
+
     \b
     # Override max tokens for this generation
     $ codewiki generate --max-tokens 16384
-    
+
     \b
     # Set all max token limits
     $ codewiki generate --max-tokens 32768 --max-token-per-module 40000 --max-token-per-leaf-module 20000
-    
+
     \b
     # Override max depth for hierarchical decomposition
     $ codewiki generate --max-depth 3
+
+    \b
+    # Use hierarchical directory structure with index file
+    $ codewiki generate --directory-structure hierarchical
+
+    \b
+    # Hierarchical structure without index generation
+    $ codewiki generate --directory-structure hierarchical --no-index
     """
     logger = create_logger(verbose=verbose)
     start_time = time.time()
@@ -422,9 +443,16 @@ def generate_command(
             'max_concurrent_llm_calls': max_concurrent_llm_calls,
         }
 
+        # Build output configuration
+        output_config = {
+            'directory_structure': directory_structure,
+            'generate_index': not no_index,
+        }
+
         if verbose:
             logger.debug(f"Scan config: {scan_config}")
             logger.debug(f"Parallel config: {parallel_config}")
+            logger.debug(f"Output config: {output_config}")
 
         # Create generator
         generator = CLIDocumentationGenerator(
@@ -449,6 +477,8 @@ def generate_command(
                 'scan': scan_config,
                 # Parallel processing configuration
                 'parallel': parallel_config,
+                # Output configuration for directory structure
+                'output': output_config,
             },
             verbose=verbose,
             generate_html=github_pages

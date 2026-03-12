@@ -144,7 +144,8 @@ class CLIDocumentationGenerator:
                 agent_instructions=self.config.get('agent_instructions'),
                 output_language=self.config.get('output_language', 'zh-CN'),
                 scan=self.config.get('scan'),
-                parallel=self.config.get('parallel')
+                parallel=self.config.get('parallel'),
+                output=self.config.get('output')
             )
             
             # Run backend documentation generation

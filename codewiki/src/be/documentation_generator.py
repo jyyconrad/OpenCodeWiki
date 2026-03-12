@@ -43,6 +43,7 @@ from codewiki.src.be.agent_tools.file_classifier import (
     FileClassifier,
     ClassificationSummary
 )
+from codewiki.src.be.output_manager import OutputManager
 
 
 class DocumentationGenerator:
@@ -53,6 +54,7 @@ class DocumentationGenerator:
         self.commit_id = commit_id
         self.graph_builder = DependencyGraphBuilder(config)
         self.agent_orchestrator = AgentOrchestrator(config)
+        self.output_manager = OutputManager(config)
 
         # Layered scanning components
         self.scanner: Optional[DirectoryScanner] = None
@@ -178,7 +180,7 @@ class DocumentationGenerator:
         """Generate documentation for all modules using dynamic programming approach."""
         # Prepare output directory
         working_dir = os.path.abspath(self.config.docs_dir)
-        file_manager.ensure_directory(working_dir)
+        self.output_manager.ensure_directory_structure()
 
         module_tree_path = os.path.join(working_dir, MODULE_TREE_FILENAME)
         first_module_tree_path = os.path.join(working_dir, FIRST_MODULE_TREE_FILENAME)
@@ -273,6 +275,11 @@ class DocumentationGenerator:
             repo_overview_path = os.path.join(working_dir, f"{repo_name}.md")
             if os.path.exists(repo_overview_path):
                 os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
+
+        # Generate index files for hierarchical structure
+        if self.config.output.directory_structure == "hierarchical":
+            logger.info("📑 Generating hierarchical index files...")
+            self.output_manager.generate_all_indices(final_module_tree)
 
         return working_dir
 
